@@ -1,0 +1,13 @@
+# Local Codex/AI database access
+.env.codex.local
+
+# Local Codex/AI deploy access
+.env.deploy.local
+
+# Local environment secrets
+.env
+.env.local
+.env.*.local
+
+# OS metadata
+.DS_Store
