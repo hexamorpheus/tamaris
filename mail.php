@@ -100,26 +100,72 @@
 
 		  
 			  <?php
+require_once __DIR__ . "/lib/MailingService.php";
+
+function tamarisPostValue($key)
+{
+    return isset($_POST[$key]) ? trim((string) $_POST[$key]) : '';
+}
+
+function tamarisEscape($value)
+{
+    return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+function tamarisSingleLine($value)
+{
+    return trim(preg_replace('/[\r\n]+/', ' ', (string) $value));
+}
+
+try {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        throw new Exception('Methode non autorisee.');
+    }
     $from = 'info@tamaris-promenades.fr';
 	$to = 'info@tamaris-promenades.fr';
 	//$to = 'remi.cervilla@gmail.com';
-    $name = $_POST["name"];
-    $email= $_POST["email"];
-    $text= $_POST["message"];
-    $phone= '<a href="tel:'.$_POST["phone"].'">'.$_POST["phone"].'</a>';
-    $dateResa= $_POST["dateResa"];
-	$circuit= $_POST["circuit"];
-	$nombre= $_POST["nombre"];
-	$momentito= $_POST["momentito"];
+    $name = tamarisPostValue('name');
+    $email = tamarisPostValue('email');
+    $text = tamarisPostValue('message');
+    $phoneRaw = tamarisPostValue('phone');
+    $dateResa = tamarisPostValue('dateResa');
+	$circuit = tamarisPostValue('circuit');
+	$nombre = tamarisPostValue('nombre');
+	$momentito = tamarisPostValue('momentito');
 
-	$today = new DateTime(); // This object represents current date/time
-	$today->setTime( 0, 0, 0 ); // reset time part, to prevent partial comparison
+    $requiredFields = array(
+        'name' => $name,
+        'email' => $email,
+        'phone' => $phoneRaw,
+        'dateResa' => $dateResa,
+        'circuit' => $circuit,
+        'nombre' => $nombre,
+        'momentito' => $momentito,
+    );
 
-	$match_date = DateTime::createFromFormat('d/m/Y', $dateResa);
-	$match_date->setTime( 0, 0, 0 ); // reset time part, to prevent partial comparison
+    foreach ($requiredFields as $field => $value) {
+        if ($value === '') {
+            throw new Exception('Champ obligatoire manquant: ' . $field);
+        }
+    }
 
-	$diff = $today->diff( $match_date );
-	$diffDays = (integer)$diff->format( "%R%a" ); // Extract days count in interval
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new Exception('Adresse email invalide.');
+    }
+
+	$today = new DateTime('today');
+
+	$dateErrors = false;
+	$match_date = DateTime::createFromFormat('!d/m/Y', $dateResa);
+	if ($match_date !== false) {
+		$dateErrors = DateTime::getLastErrors();
+	}
+	if ($match_date === false || (is_array($dateErrors) && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0))) {
+		throw new Exception('Date de reservation invalide.');
+	}
+
+	$diff = $today->diff($match_date);
+	$diffDays = (integer) $diff->format('%R%a');
 
 	$urgent="";
 	switch( $diffDays ) {
@@ -136,26 +182,29 @@
 	}
 
 
+    $phoneHref = preg_replace('/[^0-9+]/', '', $phoneRaw);
+    if ($phoneHref === '') {
+        $phoneHref = $phoneRaw;
+    }
+    $phone = '<a href="tel:' . tamarisEscape($phoneHref) . '">' . tamarisEscape($phoneRaw) . '</a>';
+
     $message ='<table style="width:100%">
         <tr>
-            <td>'.utf8_decode($name).'</td>
+            <td>'.tamarisEscape($name).'</td>
         </tr>
-        <tr><td>Email : '.$email.'</td></tr>
+        <tr><td>Email : '.tamarisEscape($email).'</td></tr>
         <tr><td>T&eacute;l&eacute;phone : '.$phone.'</td></tr>
-        <tr><td>Date souhait&eacute;e : '.$dateResa.'</td></tr>
-		<tr><td>Moment souhait&eacute; : '.utf8_decode($momentito).'</td></tr>
-		<tr><td>Circuit : '.$circuit.'</td></tr>
-		<tr><td>Nombre de cavaliers : '.$nombre.'</td></tr>
-        <tr><td>Message : '.utf8_decode($text).'</td></tr>
+        <tr><td>Date souhait&eacute;e : '.tamarisEscape($dateResa).'</td></tr>
+		<tr><td>Moment souhait&eacute; : '.tamarisEscape($momentito).'</td></tr>
+		<tr><td>Circuit : '.tamarisEscape($circuit).'</td></tr>
+		<tr><td>Nombre de cavaliers : '.tamarisEscape($nombre).'</td></tr>
+        <tr><td>Message : '.nl2br(tamarisEscape($text)).'</td></tr>
     </table>';
 
-require_once __DIR__ . "/lib/MailingService.php";
-
 //$from = $email;
-$subject = "Nouvelle reservation - ".$urgent.$dateResa.' - '.utf8_decode($name)." - ". $circuit;
+$subject = tamarisSingleLine("Nouvelle reservation - ".$urgent.$dateResa.' - '.$name." - ". $circuit);
 $body =$message;
 
-try {
     $mailingService = new MailingService();
     $result = json_decode($mailingService->sendMail(array(
         'recipient' => $to,
@@ -166,19 +215,20 @@ try {
             'email' => $from
         ),
         'replyTo' => array(
-            'name' => utf8_decode($name),
+            'name' => tamarisSingleLine($name),
             'email' => $email
         )
     )), true);
 
-    if (!is_array($result) || $result['res'] !== 'ok') {
+    if (!is_array($result) || !isset($result['res']) || $result['res'] !== 'ok') {
         $error = isset($result['error']) ? $result['error'] : 'Erreur inconnue';
         throw new Exception($error);
     }
 
-    echo '<center><h1 style="color:white">Votre message a bien été envoyé. Nous vous contactons pour vous confirmer rapidement votre réservation</h1></center>';
+    echo '<center><h1 style="color:white">Votre message a bien &eacute;t&eacute; envoy&eacute;. Nous vous contactons pour vous confirmer rapidement votre r&eacute;servation</h1></center>';
 } catch (Exception $exception) {
-    echo("<p>Error sending mail:<br/>" . htmlspecialchars($exception->getMessage(), ENT_QUOTES, 'UTF-8') . "</p>");
+    error_log('[Tamaris reservation mail] ' . $exception->getMessage());
+    echo '<p>Impossible d&apos;envoyer votre demande pour le moment.<br/>Merci de nous contacter directement par email ou par t&eacute;l&eacute;phone.</p>';
 }
 ?>
 						</div>

@@ -297,15 +297,15 @@ class MailingService
                 ));
                 //If recipient is not set, throw an exception
                 if (!$this->checkDatas($data, 'recipient')) {
-                    echo "Aucun destinataire n'a été spécifié pour l'envoi du mail.";
+                    throw new Exception("Aucun destinataire n'a ete specifie pour l'envoi du mail.");
                 }
                 //If subject is not set, throw an exception
                 if (!$this->checkDatas($data, 'subject')) {
-                    echo "Aucun sujet n'a été spécifié pour l'envoi du mail.";
+                    throw new Exception("Aucun sujet n'a ete specifie pour l'envoi du mail.");
                 }
                 //If content is not set, throw an exception
                 if (!$this->checkDatas($data, 'content')) {
-                    echo "Aucun contenu n'a été spécifié pour l'envoi du mail.";
+                    throw new Exception("Aucun contenu n'a ete specifie pour l'envoi du mail.");
                 }
 
                 $sPayload = array(
@@ -319,25 +319,39 @@ class MailingService
                 //If attachment is set, check if it's correctly formated
                 if ($this->checkDatas($data, 'attachment')) {
                     if (!$this->checkAttachmentFormat($data)) {
-                        echo "La pièce jointe n'est pas correctement formattée pour l'envoi du mail.";
+                        throw new Exception("La piece jointe n'est pas correctement formattee pour l'envoi du mail.");
                     } else {
                         $sPayload["attachment"] = $data['attachment'];
                     }
                 }
 
-                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($sPayload));
+                $payloadJson = json_encode($sPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                if ($payloadJson === false) {
+                    throw new Exception('Payload email invalide: ' . json_last_error_msg());
+                }
+
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $payloadJson);
                 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 20);
 
                 $response = curl_exec($ch);
                 if (curl_errno($ch)) {
-                    echo curl_error($ch);
-                    die();
+                    return json_encode(['res' => 'nok', 'error' => 'Erreur cURL: ' . curl_error($ch)]);
                 }
                 $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
                 if ($http_code != 201 && $http_code != 202 && $http_code != 200) {
-                    return json_encode(['res' => 'nok', 'error' => 'Mail non envoye, code HTTP : ' . $http_code, 'response' => $response]);
-                    echo "Mail non envoyé, error code : " . $http_code;
+                    $brevoError = 'Mail non envoye, code HTTP : ' . $http_code;
+                    $responseData = json_decode($response, true);
+                    if (is_array($responseData)) {
+                        if (isset($responseData['code']) && $responseData['code'] !== '') {
+                            $brevoError .= ' - ' . $responseData['code'];
+                        }
+                        if (isset($responseData['message']) && $responseData['message'] !== '') {
+                            $brevoError .= ' - ' . $responseData['message'];
+                        }
+                    }
+                    return json_encode(['res' => 'nok', 'error' => $brevoError, 'response' => $response]);
                 }
             }
         } catch (Exception $th) {
